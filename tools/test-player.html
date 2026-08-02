@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>HLS QA Player</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee; padding: 2rem; }
+  input { width: 100%; max-width: 640px; padding: 0.5rem; font-size: 1rem; }
+  video { width: 100%; max-width: 640px; margin-top: 1rem; background: #000; }
+  #log { max-width: 640px; white-space: pre-wrap; font-family: monospace; font-size: 0.8rem; color: #9f9; margin-top: 1rem; }
+  #err { color: #f88; }
+</style>
+</head>
+<body>
+  <h1>HLS QA Player</h1>
+  <p>Paste a <code>master.m3u8</code> URL (local: run <code>python3 -m http.server</code> from the repo root, then use
+     <code>http://localhost:8000/hls/&lt;slug&gt;/master.m3u8</code>) to verify playback, ABR level switching,
+     and seeking before shipping.</p>
+  <input id="url" placeholder="https://.../hls/fin3/master.m3u8" />
+  <button id="load">Load</button>
+  <video id="video" controls muted playsinline></video>
+  <div id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+  <script>
+    const video = document.getElementById('video');
+    const log = document.getElementById('log');
+    const urlInput = document.getElementById('url');
+    let hls = null;
+
+    function print(msg) {
+      log.textContent += msg + '\n';
+    }
+
+    document.getElementById('load').addEventListener('click', () => {
+      const src = urlInput.value.trim();
+      if (!src) return;
+      log.textContent = '';
+
+      if (hls) { hls.destroy(); hls = null; }
+
+      if (window.Hls && Hls.isSupported()) {
+        hls = new Hls({ maxMaxBufferLength: 30 });
+        hls.loadSource(src);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          print(`Manifest parsed: ${data.levels.length} rendition(s)`);
+          data.levels.forEach((lvl, i) => print(`  [${i}] ${lvl.width}x${lvl.height} @ ${Math.round(lvl.bitrate/1000)}kbps`));
+          video.play().catch(e => print('Autoplay blocked: ' + e.message));
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => print(`ABR switched to level ${data.level}`));
+        hls.on(Hls.Events.ERROR, (_, data) => print(`ERROR: ${data.type} / ${data.details} (fatal=${data.fatal})`));
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        print('Using native HLS support (Safari)');
+        video.src = src;
+        video.play().catch(e => print('Autoplay blocked: ' + e.message));
+      } else {
+        print('Neither hls.js nor native HLS is supported in this browser.');
+      }
+    });
+  </script>
+</body>
+</html>

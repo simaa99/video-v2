@@ -1,0 +1,9 @@
+# Raw MP4 masters are the source of truth but must NOT be committed here:
+# several already exceed GitHub's hard 100MB per-file limit (fin3.mp4 is
+# 648MB, don-blue.mp4 is 276MB). Keep raw masters in object storage
+# (S3/R2/GCS) or, at minimum, Git LFS in a separate repo. Only the
+# transcoded hls/ output belongs in this repo.
+sources/
+
+.DS_Store
+*.tmp

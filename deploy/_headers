@@ -1,0 +1,21 @@
+# Cache/CORS headers for static hosts that support a _headers file
+# (Cloudflare Pages, Netlify). GitHub Pages ignores this file entirely --
+# it has no mechanism for custom response headers, which is one reason
+# it is not recommended as the long-term host once video count grows
+# (see README "Hosting & CDN").
+
+/hls/*/master.m3u8
+  Cache-Control: public, max-age=30, must-revalidate
+  Access-Control-Allow-Origin: *
+
+/hls/*/*/index.m3u8
+  Cache-Control: public, max-age=30, must-revalidate
+  Access-Control-Allow-Origin: *
+
+/hls/*/*/*.ts
+  Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *
+
+/hls/*/poster.jpg
+  Cache-Control: public, max-age=86400
+  Access-Control-Allow-Origin: *

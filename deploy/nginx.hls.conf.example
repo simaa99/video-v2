@@ -1,0 +1,48 @@
+# Example nginx config for serving the hls/ directory as a CDN origin.
+# Use this if you move off GitHub Pages onto a VM, or as the origin behind
+# CloudFront/Cloudflare/Fastly (see README "Hosting & CDN" section for why
+# GitHub Pages cannot do this: it does not allow custom response headers).
+
+server {
+    listen 443 ssl http2;
+    server_name videos.example.com;
+
+    root /var/www/video-v2;
+
+    # Correct MIME types. nginx's bundled mime.types is usually missing
+    # .m3u8 and maps .ts to MPEG transport stream already, but pin both
+    # explicitly so an OS/package upgrade never silently regresses this.
+    types {
+        application/vnd.apple.mpegurl m3u8;
+        video/mp2t                    ts;
+        image/jpeg                    jpg jpeg;
+    }
+
+    # CORS: required if the player page is served from a different origin
+    # (e.g. www.francvila.com loading videos.example.com).
+    add_header Access-Control-Allow-Origin  "*" always;
+    add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+
+    location ~ \.m3u8$ {
+        # Playlists are cheap and must be revalidated so a re-encode of the
+        # same slug is picked up quickly. Do NOT cache these for a long time.
+        add_header Cache-Control "public, max-age=30, must-revalidate";
+        try_files $uri =404;
+    }
+
+    location ~ \.ts$ {
+        # Segments are content-addressed in practice (a re-encode should ship
+        # under a new slug/version, see README "Caching strategy"), so they
+        # can be cached aggressively and marked immutable.
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    location ~ \.(jpg|jpeg|png)$ {
+        add_header Cache-Control "public, max-age=86400";
+        try_files $uri =404;
+    }
+
+    # Never allow directory listing of the media root.
+    autoindex off;
+}

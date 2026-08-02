@@ -1,0 +1,84 @@
+name: Transcode uploaded MP4 to HLS
+
+# Stopgap automation for the current git+GitHub Pages setup. Triggered
+# manually with a URL to the raw MP4 (upload it somewhere with a temporary
+# download link first -- a private S3/R2 bucket, a Drive share link, etc.)
+# rather than by pushing the MP4 into this repo.
+#
+# Why not trigger on `git push` of a file under sources/: several files
+# already in sources/ are over GitHub's *hard* 100MB per-file limit
+# (fin3.mp4 is 648MB) -- a plain `git push` of those would simply be
+# rejected. Raw masters must never be committed to this repo; .gitignore
+# excludes sources/ entirely (see README "Hosting & CDN" / "Scalability").
+# Only the encoded .ts segments -- which are naturally chunked to a few MB
+# each -- are small enough to live in git as a stopgap.
+#
+# This does NOT solve the scale problem described in the review's
+# "Scalability" section -- it still stores every segment as a git blob and
+# still serves off GitHub Pages. For real production scale, replace this
+# whole workflow with the object-storage + queue-worker pipeline described
+# in the README.
+#
+# QA gate: scripts/convert_hls.sh self-validates via scripts/validate_hls.sh
+# before it exits successfully, so a failed transcode already stops this
+# job before the commit step. The explicit "Validate HLS output" step below
+# re-runs that same check as an independent, visible gate -- if either the
+# encode step or this step fails, the job stops and nothing is committed
+# or pushed (GitHub Actions does not run later steps after a failed one
+# unless they set `if: always()`, which none of these do).
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Direct HTTPS URL to the source MP4/MOV'
+        required: true
+      slug:
+        description: 'Output slug (folder name under hls/)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: transcode-${{ github.event.inputs.slug }}
+  cancel-in-progress: false
+
+jobs:
+  transcode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Download source video
+        run: |
+          # --max-time: abort if the download hangs or the source is unreasonably slow.
+          # --max-filesize: refuse anything bigger than 2GB -- protects the runner's
+          # disk (GitHub-hosted runners have ~14GB free) from an unbounded/wrong URL.
+          curl -fL --max-time 1800 --max-filesize 2147483648 \
+            "${{ github.event.inputs.video_url }}" -o /tmp/input.mp4
+
+      - name: Transcode
+        run: ./scripts/convert_hls.sh /tmp/input.mp4 "${{ github.event.inputs.slug }}" --force
+
+      - name: Validate HLS output
+        run: ./scripts/validate_hls.sh "${{ github.event.inputs.slug }}"
+
+      - name: Commit and push generated HLS output
+        run: |
+          git config user.name "hls-bot"
+          git config user.email "hls-bot@users.noreply.github.com"
+          git add hls/
+          git diff --cached --quiet && { echo "Nothing changed, skipping commit."; exit 0; }
+          git commit -m "chore: auto-transcode ${{ github.event.inputs.slug }} [skip ci]"
+          # Rebase onto latest main in case another run (or a manual push)
+          # landed while this job was transcoding, then push.
+          git pull --rebase origin main
+          git push
